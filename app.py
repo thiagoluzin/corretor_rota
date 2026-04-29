@@ -2,6 +2,8 @@ import streamlit as st
 from modules.ocr_engine import OCREngine
 from modules.cep_api import CEPApi
 from modules.router import Router
+from streamlit_cropper import st_cropper
+from PIL import Image
 import time
 
 # Configuração da página para Mobile-First
@@ -57,6 +59,16 @@ st.markdown("""
         font-size: 20px;
         color: #888;
     }
+    .footer {
+        text-align: center;
+        color: #4a4a4a;
+        font-size: 14px;
+        margin-top: 50px;
+        padding-bottom: 20px;
+        border-top: 1px solid #1a1c23;
+        padding-top: 20px;
+        font-family: 'Inter', sans-serif;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -71,28 +83,49 @@ st.title("🚀 AutoLabel Corrector")
 st.subheader("CTCE São José do Rio Preto")
 
 # Layout de Abas para facilitar navegação mobile
-tab1, tab2 = st.tabs(["📸 Scanner", "⌨️ Manual"])
+tab1, tab2 = st.tabs(["📸 Scanner / Foto", "⌨️ Manual"])
 
 with tab1:
-    img_file = st.camera_input("Bipar Etiqueta")
+    # 1. Dupla Opção de Captura
+    input_method = st.radio(
+        "Como deseja enviar a foto?",
+        ["Usar Câmera", "Fazer Upload da Galeria"],
+        horizontal=True
+    )
     
+    img_file = None
+    if input_method == "Usar Câmera":
+        img_file = st.camera_input("Bipar Etiqueta")
+    else:
+        img_file = st.file_uploader("Selecione a foto da etiqueta", type=['jpg', 'jpeg', 'png'])
+
     if img_file:
-        with st.spinner("Processando Imagem..."):
-            # 1. OCR
-            text = ocr.extract_text(img_file)
-            cep_detected = ocr.find_cep(text)
-            
-            # Se não detectou CEP, tenta buscar por endereço
-            if not cep_detected:
-                addr = ocr.find_address_block(text)
-                if addr["cidade"] and addr["uf"]:
-                    cep_detected = api.search_cep_by_address(addr["uf"], addr["cidade"], addr["logradouro"])
-            
-            if cep_detected:
-                st.session_state.cep = cep_detected
-                st.success(f"CEP Detectado: {cep_detected}")
-            else:
-                st.warning("Não foi possível ler o CEP automaticamente. Use a aba Manual.")
+        img = Image.open(img_file)
+        
+        st.info("Ajuste o recorte para focar no bloco 'DESTINATÁRIO'")
+        
+        # 2. Melhoria OCR: Cropper
+        cropped_img = st_cropper(img, realtime_update=True, box_color='#FF5500', aspect_ratio=None)
+        
+        if st.button("🔍 PROCESSAR RECORTE"):
+            with st.spinner("Analisando Etiqueta..."):
+                # 3. OCR no recorte
+                text = ocr.extract_text(cropped_img)
+                cep_detected = ocr.find_cep(text)
+                
+                # Se não detectou CEP, tenta buscar por endereço
+                if not cep_detected:
+                    addr = ocr.find_address_block(text)
+                    if addr["cidade"] and addr["uf"]:
+                        cep_detected = api.search_cep_by_address(addr["uf"], addr["cidade"], addr["logradouro"])
+                
+                if cep_detected:
+                    st.session_state.cep = cep_detected
+                    st.success(f"CEP Detectado: {cep_detected}")
+                else:
+                    st.warning("Não foi possível ler o CEP. Tente ajustar o recorte ou insira manualmente.")
+                    with st.expander("Ver texto extraído"):
+                        st.write(text)
 
 with tab2:
     cep_input = st.text_input("Digite o CEP Real", placeholder="00000000")
@@ -103,11 +136,7 @@ with tab2:
 # Lógica de Exibição do Resultado
 if "cep" in st.session_state:
     cep_to_route = st.session_state.cep
-    
-    # Busca dados do CEP (Endereço)
     address_data = api.get_address_by_cep(cep_to_route)
-    
-    # Busca Roteamento (Bateria/Posição)
     route = router.route_cep(cep_to_route)
     
     if route:
@@ -127,18 +156,23 @@ if "cep" in st.session_state:
             </div>
             """, unsafe_allow_html=True)
         
-        # Botão para Limpar e Próximo
         if st.button("🔄 PRÓXIMO PACOTE"):
             del st.session_state.cep
             st.rerun()
     else:
-        st.error(f"CEP {cep_to_route} não encontrado nas matrizes logísticas!")
+        st.error(f"CEP {cep_to_route} não encontrado nas matrizes!")
         if address_data:
             st.info(f"Cidade: {address_data['cidade']} - {address_data['uf']}")
-        
         if st.button("Tentar Outro"):
             del st.session_state.cep
             st.rerun()
 
-st.sidebar.markdown("---")
-st.sidebar.info("AutoLabel v1.0 - Correção de CEP 15123002")
+# 2. Assinatura Institucional (Rodapé)
+st.markdown("""
+    <div class="footer">
+        Desenvolvido por Thiago Luzin<br>
+        <b>CTCE São José do Rio Preto</b>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.sidebar.info("AutoLabel v1.1 - OCR Otimizado com Cropper")
