@@ -4,4 +4,4 @@ pytesseract
 Pillow
 requests
 streamlit-cropper
-opencv-python
+opencv-python-headless
