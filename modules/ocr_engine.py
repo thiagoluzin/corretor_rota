@@ -2,6 +2,8 @@ import pytesseract
 from PIL import Image, ImageOps, ImageFilter
 import re
 import os
+import cv2
+import numpy as np
 
 class OCREngine:
     def __init__(self):
@@ -16,32 +18,41 @@ class OCREngine:
                 pytesseract.pytesseract.tesseract_cmd = path
                 break
 
-    def preprocess_image(self, image):
+    def preprocess_image(self, pil_image):
         """
-        Pré-processamento para melhorar OCR: Escala de cinza e Threshold.
+        Pré-processamento avançado com OpenCV para melhorar OCR.
         """
+        # Converte PIL para OpenCV (numpy array)
+        open_cv_image = np.array(pil_image)
+        # Converte RGB para BGR
+        open_cv_image = open_cv_image[:, :, ::-1].copy()
+        
         # Converte para escala de cinza
-        gray = image.convert('L')
+        gray = cv2.cvtColor(open_cv_image, cv2.COLOR_BGR2GRAY)
         
-        # Aumenta contraste
-        enhanced = ImageOps.autocontrast(gray)
+        # Redimensiona para melhorar leitura de texto pequeno
+        gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         
-        # Aplica threshold (limiarização)
-        threshold = 150
-        binary = enhanced.point(lambda p: 255 if p > threshold else 0)
+        # Aplica threshold adaptativo ou Otsu
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
-        return binary
+        # Denoising
+        denoised = cv2.fastNlMeansDenoising(thresh, None, 10, 7, 21)
+        
+        # Retorna de volta para PIL
+        return Image.fromarray(denoised)
 
-    def extract_text(self, image_bytes):
+    def extract_text(self, pil_image):
         """
         Lê a imagem e extrai o texto.
         """
         try:
-            image = Image.open(image_bytes)
-            processed_image = self.preprocess_image(image)
+            processed_image = self.preprocess_image(pil_image)
             
             # Extrai texto com configuração otimizada para português
-            text = pytesseract.image_to_string(processed_image, lang='por')
+            # --psm 6: Assume a single uniform block of text.
+            custom_config = r'--oem 3 --psm 6 -l por'
+            text = pytesseract.image_to_string(processed_image, config=custom_config)
             return text
         except Exception as e:
             return f"Erro no OCR: {str(e)}"
@@ -50,7 +61,6 @@ class OCREngine:
         """
         Tenta encontrar um padrão de CEP no texto (00000-000 ou 00000000).
         """
-        # Ignora o CEP errado conhecido (15123002) se possível, ou prioriza outros
         ceps = re.findall(r'\b\d{5}-?\d{3}\b', text)
         
         # Filtra o CEP genérico errado
@@ -67,7 +77,6 @@ class OCREngine:
         """
         Tenta isolar o bloco de DESTINATÁRIO e extrair Cidade/UF.
         """
-        # Procura por palavras chave
         lines = text.split('\n')
         address_info = {"cidade": "", "uf": "", "logradouro": ""}
         
@@ -77,7 +86,6 @@ class OCREngine:
             if match_uf:
                 address_info["cidade"] = match_uf.group(1).strip()
                 address_info["uf"] = match_uf.group(2).strip()
-                # O logradouro geralmente está na linha anterior ou na mesma
                 if i > 0:
                     address_info["logradouro"] = lines[i-1].strip()
                 break
