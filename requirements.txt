@@ -5,3 +5,5 @@ Pillow
 requests
 streamlit-cropper
 opencv-python-headless
+openpyxl
+

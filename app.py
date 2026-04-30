@@ -50,6 +50,23 @@ def init_modules():
 
 ocr, api, router = init_modules()
 
+# Diagnóstico das planilhas no Sidebar
+with st.sidebar:
+    st.markdown("### 📊 Status das Planilhas")
+    diag = router.diagnostico()
+    for nome, info in [("PL1 (SDX_E1)", diag["planilha1"]), ("PL2 (CTCE_SJO_2)", diag["planilha2"])]:
+        linhas = info["linhas"]
+        cols   = info["colunas_detectadas"]
+        if linhas > 0:
+            st.success(f"✅ {nome}: {linhas} linhas")
+        else:
+            st.error(f"❌ {nome}: não carregada")
+        with st.expander(f"Colunas detectadas — {nome}"):
+            st.json(cols)
+            st.caption("Colunas brutas: " + ", ".join(info["colunas_raw"]))
+    st.markdown("---")
+    st.info("AutoLabel v1.2")
+
 st.title("🚀 AutoLabel Corrector")
 st.subheader("CTCE São José do Rio Preto")
 
@@ -129,11 +146,12 @@ if "cep" in st.session_state:
     if route.get("sucesso"):
         st.markdown(f"""
             <div class="result-card">
-                <div class="info-text">DESTINO LOGÍSTICO</div>
-                <div class="neon-text" style="font-size: 28px; font-weight: bold;">{route['destino']}</div>
-                <hr style="border-color: #333;">
                 <div class="info-text">CÉLULA</div>
                 <div class="neon-text label-huge">{route['celula']}</div>
+                <hr style="border-color: #333;">
+                <div class="info-text">UNIDADE</div>
+                <div class="neon-text" style="font-size: 28px; font-weight: bold;">{route['destino']}</div>
+                <hr style="border-color: #333;">
                 <div class="info-text">POSIÇÃO</div>
                 <div class="neon-text label-pos">{route['posicao']}</div>
                 <div style="font-size: 14px; color: #555; margin-top: 10px;">CEP Real: {st.session_state.cep}</div>
