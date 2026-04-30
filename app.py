@@ -13,66 +13,33 @@ st.set_page_config(
     layout="centered"
 )
 
-# CSS Customizado para Visual Premium e Mobile-First
+# CSS Customizado
 st.markdown("""
     <style>
-    .main {
-        background-color: #0e1117;
-    }
+    .main { background-color: #0e1117; }
     .stButton>button {
-        width: 100%;
-        height: 80px;
-        font-size: 24px !important;
-        font-weight: bold;
-        border-radius: 15px;
-        background-color: #FF5500;
-        color: white;
-        border: none;
-        box-shadow: 0 4px 15px rgba(255, 85, 0, 0.3);
+        width: 100%; height: 80px; font-size: 24px !important; font-weight: bold;
+        border-radius: 15px; background-color: #FF5500; color: white;
     }
     .result-card {
-        background-color: #1a1c23;
-        border: 3px solid #00ff41;
-        border-radius: 20px;
-        padding: 25px;
-        text-align: center;
-        margin-top: 20px;
-        box-shadow: 0 0 20px rgba(0, 255, 65, 0.2);
+        background-color: #1a1c23; border: 3px solid #00ff41; border-radius: 20px;
+        padding: 25px; text-align: center; margin-top: 20px;
     }
-    .neon-text {
-        color: #00ff41;
-        text-shadow: 0 0 10px #00ff41;
-        font-family: 'Courier New', Courier, monospace;
-    }
-    .label-huge {
-        font-size: 50px;
-        font-weight: 900;
-        margin: 0;
-    }
-    .label-pos {
-        font-size: 80px;
-        font-weight: 900;
-        margin: 0;
-        line-height: 1;
-    }
-    .info-text {
-        font-size: 20px;
-        color: #888;
+    .neon-text { color: #00ff41; text-shadow: 0 0 10px #00ff41; font-family: monospace; }
+    .label-huge { font-size: 50px; font-weight: 900; margin: 0; }
+    .label-pos { font-size: 80px; font-weight: 900; margin: 0; line-height: 1; }
+    .warning-box {
+        background-color: #ff0000; color: white; padding: 15px;
+        border-radius: 10px; font-weight: bold; text-align: center; margin-bottom: 20px;
+        border: 2px solid white;
     }
     .footer {
-        text-align: center;
-        color: #4a4a4a;
-        font-size: 14px;
-        margin-top: 50px;
-        padding-bottom: 20px;
-        border-top: 1px solid #1a1c23;
-        padding-top: 20px;
-        font-family: 'Inter', sans-serif;
+        text-align: center; color: #4a4a4a; font-size: 14px; margin-top: 50px;
+        border-top: 1px solid #1a1c23; padding-top: 20px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# Inicialização de Módulos (com cache para performance)
 @st.cache_resource
 def init_modules():
     return OCREngine(), CEPApi(), Router()
@@ -82,103 +49,81 @@ ocr, api, router = init_modules()
 st.title("🚀 AutoLabel Corrector")
 st.subheader("CTCE São José do Rio Preto")
 
-# Layout de Abas para facilitar navegação mobile
-tab1, tab2 = st.tabs(["📸 Scanner / Foto", "⌨️ Manual"])
+tab1, tab2 = st.tabs(["📸 Scanner de Endereço", "⌨️ Entrada Manual"])
 
 with tab1:
-    # 1. Dupla Opção de Captura
-    input_method = st.radio(
-        "Como deseja enviar a foto?",
-        ["Usar Câmera", "Fazer Upload da Galeria"],
-        horizontal=True
-    )
-    
-    img_file = None
-    if input_method == "Usar Câmera":
-        img_file = st.camera_input("Bipar Etiqueta")
-    else:
-        img_file = st.file_uploader("Selecione a foto da etiqueta", type=['jpg', 'jpeg', 'png'])
+    input_method = st.radio("Como enviar a foto?", ["Câmera", "Galeria"], horizontal=True)
+    img_file = st.camera_input("Foto da Etiqueta") if input_method == "Câmera" else st.file_uploader("Upload da Etiqueta", type=['jpg', 'jpeg', 'png'])
 
     if img_file:
         img = Image.open(img_file)
         
-        st.info("Ajuste o recorte para focar no bloco 'DESTINATÁRIO'")
+        # AVISO CRÍTICO NO CROPPER
+        st.markdown('<div class="warning-box">⚠️ ATENÇÃO: RECORTE APENAS O NOME DA RUA E CIDADE DO DESTINATÁRIO.<br>NÃO INCLUA CEPs, CÓDIGOS DE BARRAS NEM O REMETENTE.</div>', unsafe_allow_html=True)
         
-        # 2. Melhoria OCR: Cropper
         cropped_img = st_cropper(img, realtime_update=True, box_color='#FF5500', aspect_ratio=None)
         
-        if st.button("🔍 PROCESSAR RECORTE"):
-            with st.spinner("Analisando Etiqueta..."):
-                # 3. OCR no recorte
-                text = ocr.extract_text(cropped_img)
-                cep_detected = ocr.find_cep(text)
+        if st.button("🔍 DESCOBRIR CEP E ROTEAR"):
+            with st.spinner("Analisando endereço..."):
+                addr_data = ocr.extract_address_data(cropped_img)
                 
-                # Se não detectou CEP, tenta buscar por endereço
-                if not cep_detected:
-                    addr = ocr.find_address_block(text)
-                    if addr["cidade"] and addr["uf"]:
-                        cep_detected = api.search_cep_by_address(addr["uf"], addr["cidade"], addr["logradouro"])
-                
-                if cep_detected:
-                    st.session_state.cep = cep_detected
-                    st.success(f"CEP Detectado: {cep_detected}")
+                if addr_data.get("cidade") and addr_data.get("uf"):
+                    st.write(f"📍 Buscando: {addr_data['logradouro']}, {addr_data['cidade']}-{addr_data['uf']}")
+                    cep_real = api.find_cep_by_address(addr_data["uf"], addr_data["cidade"], addr_data["logradouro"])
+                    
+                    if cep_real:
+                        st.session_state.cep = cep_real
+                        st.success(f"✅ CEP Identificado via API: {cep_real}")
+                    else:
+                        st.error("❌ Endereço não encontrado na base do ViaCEP. Tente o ajuste manual.")
+                        with st.expander("Ver texto lido pelo OCR"):
+                            st.write(addr_data.get("texto_bruto"))
                 else:
-                    st.warning("Não foi possível ler o CEP. Tente ajustar o recorte ou insira manualmente.")
-                    with st.expander("Ver texto extraído"):
-                        st.write(text)
+                    st.error("❌ Não foi possível identificar Cidade/UF no recorte.")
+                    with st.expander("Ver texto lido pelo OCR"):
+                        st.write(addr_data.get("texto_bruto"))
 
 with tab2:
-    cep_input = st.text_input("Digite o CEP Real", placeholder="00000000")
-    if st.button("Buscar Roteamento"):
-        if cep_input:
-            st.session_state.cep = cep_input
-
-# Lógica de Exibição do Resultado
-if "cep" in st.session_state:
-    cep_to_route = st.session_state.cep
-    address_data = api.get_address_by_cep(cep_to_route)
-    route = router.route_cep(cep_to_route)
+    st.write("Insira os dados do destinatário conforme a etiqueta:")
+    col1, col2 = st.columns([1, 3])
+    with col1: uf_manual = st.text_input("UF", placeholder="SP", max_chars=2)
+    with col2: cidade_manual = st.text_input("Cidade", placeholder="Ex: Ribeirao Preto")
+    rua_manual = st.text_input("Logradouro (Rua/Av)", placeholder="Ex: Rua Santa Cruz")
     
+    if st.button("🚀 ROTEAR POR ENDEREÇO"):
+        if uf_manual and cidade_manual and rua_manual:
+            with st.spinner("Consultando CEP oficial..."):
+                cep_real = api.find_cep_by_address(uf_manual, cidade_manual, rua_manual)
+                if cep_real:
+                    st.session_state.cep = cep_real
+                else:
+                    st.error("CEP não encontrado para este endereço.")
+        else:
+            st.warning("Preencha todos os campos.")
+
+# Lógica de Roteamento
+if "cep" in st.session_state:
+    route = router.route_cep(st.session_state.cep)
     if route.get("sucesso"):
         st.markdown(f"""
             <div class="result-card">
-                <div class="info-text">DESTINO</div>
-                <div class="neon-text" style="font-size: 24px; font-weight: bold;">
-                    {route['destino']}
-                </div>
-                <div style="font-size: 12px; color: #555; margin-bottom: 10px;">
-                    {address_data['cidade'] if address_data else ''} - {address_data['uf'] if address_data else ''}
-                </div>
+                <div class="info-text">DESTINO LOGÍSTICO</div>
+                <div class="neon-text" style="font-size: 28px; font-weight: bold;">{route['destino']}</div>
                 <hr style="border-color: #333;">
                 <div class="info-text">CÉLULA</div>
                 <div class="neon-text label-huge">{route['celula']}</div>
                 <div class="info-text">POSIÇÃO</div>
                 <div class="neon-text label-pos">{route['posicao']}</div>
-                <hr style="border-color: #333;">
-                <div style="font-size: 14px; color: #555;">Roteamento Relacional (PL1 + PL2)</div>
+                <div style="font-size: 14px; color: #555; margin-top: 10px;">CEP Real: {st.session_state.cep}</div>
             </div>
             """, unsafe_allow_html=True)
-        
-        if route.get("aviso"):
-            st.warning(route["aviso"])
-        
         if st.button("🔄 PRÓXIMO PACOTE"):
             del st.session_state.cep
             st.rerun()
     else:
-        st.error(f"Erro no Roteamento: {route.get('erro', 'Desconhecido')}")
-        if address_data:
-            st.info(f"Endereço: {address_data['cidade']} - {address_data['uf']}")
-        if st.button("Tentar Outro"):
+        st.error(f"Erro: {route.get('erro')}")
+        if st.button("Tentar Novamente"):
             del st.session_state.cep
             st.rerun()
 
-# 2. Assinatura Institucional (Rodapé)
-st.markdown("""
-    <div class="footer">
-        Desenvolvido por Thiago Luzin<br>
-        <b>CTCE São José do Rio Preto</b>
-    </div>
-    """, unsafe_allow_html=True)
-
-st.sidebar.info("AutoLabel v1.1 - OCR Otimizado com Cropper")
+st.markdown('<div class="footer">Desenvolvido por Thiago Luzin<br><b>CTCE São José do Rio Preto</b></div>', unsafe_allow_html=True)
