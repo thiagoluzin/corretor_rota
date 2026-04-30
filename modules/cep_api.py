@@ -5,36 +5,13 @@ import urllib.parse
 class CEPApi:
     def __init__(self):
         self.via_cep_url = "https://viacep.com.br/ws/{}/json/"
-        # Endpoint de busca por endereço: viacep.com.br/ws/RS/Porto Alegre/Domingos/json/
         self.via_cep_address_url = "https://viacep.com.br/ws/{}/{}/{}/json/"
-        self.brasil_api_url = "https://brasilapi.com.br/api/cep/v1/{}"
-
-    def clean_string(self, text):
-        if not text:
-            return ""
-        # Remove caracteres especiais mas mantém espaços para a busca
-        return re.sub(r'[^\w\s]', '', str(text)).strip()
 
     def get_address_by_cep(self, cep):
-        """Busca o endereço a partir de um CEP (Fallback)"""
+        """Busca o endereço a partir de um CEP."""
         cep = re.sub(r'\D', '', str(cep))
         if len(cep) != 8:
             return None
-
-        try:
-            response = requests.get(self.brasil_api_url.format(cep), timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "logradouro": data.get("street", ""),
-                    "bairro": data.get("neighborhood", ""),
-                    "cidade": data.get("city", ""),
-                    "uf": data.get("state", ""),
-                    "cep": cep
-                }
-        except Exception:
-            pass
-
         try:
             response = requests.get(self.via_cep_url.format(cep), timeout=5)
             if response.status_code == 200:
@@ -51,32 +28,76 @@ class CEPApi:
             pass
         return None
 
-    def find_cep_by_address(self, uf, city, street):
-        """
-        REGRA CRÍTICA: Busca o CEP real a partir do endereço lido pelo OCR ou digitado.
-        """
-        uf = self.clean_string(uf).upper()
-        city = self.clean_string(city)
-        street = self.clean_string(street)
+    def _limpar_str(self, texto):
+        """Remove acentos e caracteres especiais para busca na API."""
+        if not texto:
+            return ""
+        replacements = {
+            'Á':'A','À':'A','Ã':'A','Â':'A','á':'a','à':'a','ã':'a','â':'a',
+            'É':'E','Ê':'E','é':'e','ê':'e','Í':'I','í':'i',
+            'Ó':'O','Ô':'O','Õ':'O','ó':'o','ô':'o','õ':'o',
+            'Ú':'U','ú':'u','Ç':'C','ç':'c'
+        }
+        for k, v in replacements.items():
+            texto = texto.replace(k, v)
+        # Remove pontuação e caracteres indesejados
+        texto = re.sub(r'[^\w\s]', ' ', texto)
+        return re.sub(r'\s+', ' ', texto).strip()
 
-        if not uf or not city or len(street) < 3:
+    def _consultar_viacep(self, uf, city, street):
+        """Faz a consulta ao ViaCEP e retorna o primeiro CEP encontrado."""
+        uf_clean = self._limpar_str(uf).upper()
+        city_clean = self._limpar_str(city)
+        street_clean = self._limpar_str(street)
+
+        if not uf_clean or not city_clean or len(street_clean) < 3:
             return None
 
-        # Codifica para URL (trata espaços e acentos)
-        city_encoded = urllib.parse.quote(city)
-        street_encoded = urllib.parse.quote(street)
-        
-        url = self.via_cep_address_url.format(uf, city_encoded, street_encoded)
-        
+        url = self.via_cep_address_url.format(
+            uf_clean,
+            urllib.parse.quote(city_clean),
+            urllib.parse.quote(street_clean)
+        )
         try:
-            response = requests.get(url, timeout=5)
+            response = requests.get(url, timeout=6)
             if response.status_code == 200:
                 data = response.json()
                 if isinstance(data, list) and len(data) > 0:
-                    # Retorna o CEP do primeiro resultado encontrado
-                    # Limpa o hífen
                     return data[0].get("cep", "").replace("-", "")
         except Exception as e:
-            print(f"Erro na consulta de CEP por endereço: {e}")
-        
+            print(f"ViaCEP erro: {e}")
+        return None
+
+    def find_cep_by_address(self, uf, city, street):
+        """
+        Busca o CEP real com múltiplas tentativas progressivas.
+        """
+        # Tentativa 1: Nome completo da rua
+        cep = self._consultar_viacep(uf, city, street)
+        if cep:
+            return cep
+
+        # Tentativa 2: Remove a primeira palavra (pode ser "Rua", "Av", etc.)
+        palavras = street.split()
+        if len(palavras) > 1:
+            street_sem_prefixo = " ".join(palavras[1:])
+            cep = self._consultar_viacep(uf, city, street_sem_prefixo)
+            if cep:
+                return cep
+
+        # Tentativa 3: Usa apenas a última palavra significativa do nome da rua
+        # (Ex: "Santa Cruz" → tenta só "Cruz")
+        if len(palavras) > 1:
+            ultima_palavra = palavras[-1]
+            if len(ultima_palavra) > 3:
+                cep = self._consultar_viacep(uf, city, ultima_palavra)
+                if cep:
+                    return cep
+
+        # Tentativa 4: Sem o nome da rua — retorna CEP geral da cidade
+        # (útil para roteamento mesmo sem endereço preciso)
+        cep = self._consultar_viacep(uf, city, city)
+        if cep:
+            return cep
+
         return None
