@@ -149,6 +149,11 @@ if "cep" in st.session_state:
     route = router.route_cep(st.session_state.cep)
     if route.get("sucesso"):
         st.markdown(f"""
+            <div style="background-color: #0f291e; border: 2px solid #00ff00; border-radius: 10px; padding: 15px; text-align: center; margin-bottom: 20px; box-shadow: 0 0 15px rgba(0,255,0,0.2);">
+                <div style="color: #a0a0a0; font-size: 14px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px;">CEP DE ROTEAMENTO</div>
+                <div style="color: #00ff00; font-size: 42px; font-weight: 900; letter-spacing: 6px; text-shadow: 0 0 10px rgba(0,255,0,0.5);">{st.session_state.cep}</div>
+            </div>
+            
             <div class="result-card">
                 <div class="info-text">CÉLULA</div>
                 <div class="neon-text label-huge">{route['celula']}</div>
@@ -158,7 +163,6 @@ if "cep" in st.session_state:
                 <hr style="border-color: #333;">
                 <div class="info-text">POSIÇÃO</div>
                 <div class="neon-text label-pos">{route['posicao']}</div>
-                <div style="font-size: 14px; color: #555; margin-top: 10px;">CEP Real: {st.session_state.cep}</div>
             </div>
             """, unsafe_allow_html=True)
         if st.button("🔄 PRÓXIMO PACOTE"):
