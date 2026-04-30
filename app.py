@@ -40,7 +40,8 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-@st.cache_resource
+# Removido o cache temporariamente para garantir que as atualizações dos módulos sejam lidas
+# @st.cache_resource
 def init_modules():
     return OCREngine(), CEPApi(), Router()
 
