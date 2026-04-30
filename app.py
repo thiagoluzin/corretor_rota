@@ -56,16 +56,15 @@ with st.sidebar:
     diag = router.diagnostico()
     for nome, info in [("PL1 (SDX_E1)", diag["planilha1"]), ("PL2 (CTCE_SJO_2)", diag["planilha2"])]:
         linhas = info["linhas"]
-        cols   = info["colunas_detectadas"]
+        cols   = info["colunas"]
         if linhas > 0:
             st.success(f"✅ {nome}: {linhas} linhas")
         else:
             st.error(f"❌ {nome}: não carregada")
-        with st.expander(f"Colunas detectadas — {nome}"):
+        with st.expander(f"Colunas — {nome}"):
             st.json(cols)
-            st.caption("Colunas brutas: " + ", ".join(info["colunas_raw"]))
     st.markdown("---")
-    st.info("AutoLabel v1.2")
+    st.info("AutoLabel v1.3")
 
 st.title("🚀 AutoLabel Corrector")
 st.subheader("CTCE São José do Rio Preto")
