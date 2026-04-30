@@ -70,40 +70,58 @@ with tab1:
         if st.button("🔍 DESCOBRIR CEP E ROTEAR"):
             with st.spinner("Analisando endereço..."):
                 addr_data = ocr.extract_address_data(cropped_img)
-                
-                if addr_data.get("cidade") and addr_data.get("uf"):
-                    st.write(f"📍 Buscando: {addr_data['logradouro']}, {addr_data['cidade']}-{addr_data['uf']}")
-                    cep_real = api.find_cep_by_address(addr_data["uf"], addr_data["cidade"], addr_data["logradouro"])
-                    
+
+                cidade = addr_data.get("cidade", "")
+                uf = addr_data.get("uf", "")
+                rua = addr_data.get("logradouro", "")
+
+                # Mostra o que foi extraído para o operador validar
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Rua Extraída", rua or "—")
+                col2.metric("Cidade", cidade or "—")
+                col3.metric("UF", uf or "—")
+
+                if cidade and uf:
+                    cep_real = api.find_cep_by_address(uf, cidade, rua)
+
                     if cep_real:
                         st.session_state.cep = cep_real
-                        st.success(f"✅ CEP Identificado via API: {cep_real}")
+                        st.success(f"✅ CEP Identificado: **{cep_real}**")
                     else:
-                        st.error("❌ Endereço não encontrado na base do ViaCEP. Tente o ajuste manual.")
-                        with st.expander("Ver texto lido pelo OCR"):
-                            st.write(addr_data.get("texto_bruto"))
+                        st.error("❌ Não encontrado no ViaCEP. Corrija os campos na aba Manual.")
+                        # Pré-preenche a aba manual com os dados extraídos
+                        st.session_state.manual_uf = uf
+                        st.session_state.manual_cidade = cidade
+                        st.session_state.manual_rua = rua
                 else:
-                    st.error("❌ Não foi possível identificar Cidade/UF no recorte.")
-                    with st.expander("Ver texto lido pelo OCR"):
-                        st.write(addr_data.get("texto_bruto"))
+                    st.error("❌ Não identificou Cidade/UF. Ajuste o recorte.")
+
+                with st.expander("🔍 Ver texto bruto do OCR"):
+                    st.text(addr_data.get("texto_bruto", ""))
 
 with tab2:
     st.write("Insira os dados do destinatário conforme a etiqueta:")
     col1, col2 = st.columns([1, 3])
-    with col1: uf_manual = st.text_input("UF", placeholder="SP", max_chars=2)
-    with col2: cidade_manual = st.text_input("Cidade", placeholder="Ex: Ribeirao Preto")
-    rua_manual = st.text_input("Logradouro (Rua/Av)", placeholder="Ex: Rua Santa Cruz")
-    
+    with col1:
+        uf_manual = st.text_input("UF", value=st.session_state.get("manual_uf", ""), placeholder="SP", max_chars=2)
+    with col2:
+        cidade_manual = st.text_input("Cidade", value=st.session_state.get("manual_cidade", ""), placeholder="Ex: Tiete")
+    rua_manual = st.text_input("Logradouro (Rua/Av)", value=st.session_state.get("manual_rua", ""), placeholder="Ex: Santa Cruz")
+
     if st.button("🚀 ROTEAR POR ENDEREÇO"):
         if uf_manual and cidade_manual and rua_manual:
             with st.spinner("Consultando CEP oficial..."):
                 cep_real = api.find_cep_by_address(uf_manual, cidade_manual, rua_manual)
                 if cep_real:
                     st.session_state.cep = cep_real
+                    # Limpa os dados pré-preenchidos após sucesso
+                    for k in ["manual_uf", "manual_cidade", "manual_rua"]:
+                        st.session_state.pop(k, None)
                 else:
-                    st.error("CEP não encontrado para este endereço.")
+                    st.error("CEP não encontrado. Verifique a ortografia da cidade e rua.")
         else:
             st.warning("Preencha todos os campos.")
+
 
 # Lógica de Roteamento
 if "cep" in st.session_state:
