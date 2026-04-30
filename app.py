@@ -1,4 +1,7 @@
 import streamlit as st
+import importlib
+import modules.ocr_engine
+importlib.reload(modules.ocr_engine)
 from modules.ocr_engine import OCREngine
 from modules.cep_api import CEPApi
 from modules.router import Router
