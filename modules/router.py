@@ -11,8 +11,8 @@ class Router:
         self.df2 = self._load("CTCE_SJO_2_EXP_SAP_PCT_SDX_4_PCT_2025 (10)")
 
         if self.df1 is not None:
-            self.df1['CEP_INICIAL'] = self.df1['CEP_INICIAL'].apply(self._cep_int)
-            self.df1['CEP_FINAL']   = self.df1['CEP_FINAL'].apply(self._cep_int)
+            self.df1['CEP_INICIAL'] = self.df1['CEP_INICIAL'].apply(self._parse_excel_cep)
+            self.df1['CEP_FINAL']   = self.df1['CEP_FINAL'].apply(self._parse_excel_cep)
             self.df1 = self.df1[self.df1['CEP_INICIAL'] > 0]
             # Normaliza nomes para lookup
             self.df1['DIRECAO_TRIAGEM'] = self.df1['DIRECAO_TRIAGEM'].astype(str).str.strip()
@@ -47,15 +47,23 @@ class Router:
         print(f"[Router] Arquivo não encontrado: {nome_base}")
         return None
 
-    def _cep_int(self, valor):
+    def _parse_excel_cep(self, valor):
         """
-        Converte CEP para inteiro.
-        Regra: aceita apenas CEPs com exatamente 8 dígitos após limpeza.
-        CEPs com menos dígitos são descartados (retorna 0) para evitar
-        matches errados causados por OCR truncado.
-        Ex: '95678-871' -> 95678871 OK
-            '9500-34'   -> 6 digitos -> 0 (invalido, cai no fallback de endereço)
-            '01310100'  -> 01310100 OK
+        Lê o CEP da planilha. Como o Excel remove zeros à esquerda de números
+        (ex: 05000000 vira 5000000), aceitamos qualquer valor numérico.
+        """
+        try:
+            apenas_digitos = re.sub(r'\D', '', str(valor))
+            if not apenas_digitos:
+                return 0
+            return int(apenas_digitos)
+        except (ValueError, TypeError):
+            return 0
+
+    def _parse_user_cep(self, valor):
+        """
+        Lê o CEP do OCR/Usuário. DEVE ter exatamente 8 dígitos para ser válido.
+        Impede que leituras quebradas do OCR (ex: '9500-34') gerem rotas erradas.
         """
         try:
             apenas_digitos = re.sub(r'\D', '', str(valor))
@@ -83,7 +91,7 @@ class Router:
         A) CEP (range) → MCMCU_CENTRALIZADOR_DESTINO + DIRECAO_TRIAGEM (PL1)
         B) MCMCU_CENTRALIZADOR_DESTINO + DIRECAO_TRIAGEM → CELULA + POSICAO (PL2)
         """
-        cep_int = self._cep_int(cep)
+        cep_int = self._parse_user_cep(cep)
         if cep_int == 0:
             return {"sucesso": False, "erro": "CEP inválido"}
 
