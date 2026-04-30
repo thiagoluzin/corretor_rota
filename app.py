@@ -139,30 +139,36 @@ if "cep" in st.session_state:
     address_data = api.get_address_by_cep(cep_to_route)
     route = router.route_cep(cep_to_route)
     
-    if route:
+    if route.get("sucesso"):
         st.markdown(f"""
             <div class="result-card">
                 <div class="info-text">DESTINO</div>
                 <div class="neon-text" style="font-size: 24px; font-weight: bold;">
-                    {address_data['cidade'] if address_data else 'DESCONHECIDO'} - {address_data['uf'] if address_data else ''}
+                    {route['destino']}
+                </div>
+                <div style="font-size: 12px; color: #555; margin-bottom: 10px;">
+                    {address_data['cidade'] if address_data else ''} - {address_data['uf'] if address_data else ''}
                 </div>
                 <hr style="border-color: #333;">
-                <div class="info-text">BATERIA</div>
-                <div class="neon-text label-huge">{route['bateria']}</div>
+                <div class="info-text">CÉLULA</div>
+                <div class="neon-text label-huge">{route['celula']}</div>
                 <div class="info-text">POSIÇÃO</div>
                 <div class="neon-text label-pos">{route['posicao']}</div>
                 <hr style="border-color: #333;">
-                <div style="font-size: 14px; color: #555;">Fonte: {route['matriz']}</div>
+                <div style="font-size: 14px; color: #555;">Roteamento Relacional (PL1 + PL2)</div>
             </div>
             """, unsafe_allow_html=True)
+        
+        if route.get("aviso"):
+            st.warning(route["aviso"])
         
         if st.button("🔄 PRÓXIMO PACOTE"):
             del st.session_state.cep
             st.rerun()
     else:
-        st.error(f"CEP {cep_to_route} não encontrado nas matrizes!")
+        st.error(f"Erro no Roteamento: {route.get('erro', 'Desconhecido')}")
         if address_data:
-            st.info(f"Cidade: {address_data['cidade']} - {address_data['uf']}")
+            st.info(f"Endereço: {address_data['cidade']} - {address_data['uf']}")
         if st.button("Tentar Outro"):
             del st.session_state.cep
             st.rerun()
