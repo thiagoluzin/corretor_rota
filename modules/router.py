@@ -1,144 +1,156 @@
-import pandas as pd
-import os
+import pytesseract
+from PIL import Image
 import re
+import os
+import cv2
+import numpy as np
 
-class Router:
-    def __init__(self, data_dir="data"):
-        self.data_dir = data_dir
+# Mapeamento de nomes de estado por extenso para sigla
+ESTADOS_BR = {
+    "ACRE": "AC", "ALAGOAS": "AL", "AMAPA": "AP", "AMAZONAS": "AM",
+    "BAHIA": "BA", "CEARA": "CE", "DISTRITO FEDERAL": "DF", "ESPIRITO SANTO": "ES",
+    "GOIAS": "GO", "MARANHAO": "MA", "MATO GROSSO DO SUL": "MS", "MATO GROSSO": "MT",
+    "MINAS GERAIS": "MG", "PARA": "PA", "PARAIBA": "PB", "PARANA": "PR",
+    "PERNAMBUCO": "PE", "PIAUI": "PI", "RIO DE JANEIRO": "RJ",
+    "RIO GRANDE DO NORTE": "RN", "RIO GRANDE DO SUL": "RS", "RONDONIA": "RO",
+    "RORAIMA": "RR", "SANTA CATARINA": "SC", "SAO PAULO": "SP",
+    "SAOPAULO": "SP", "S.PAULO": "SP", "S PAULO": "SP",
+    "SERGIPE": "SE", "TOCANTINS": "TO"
+}
 
-        # Tenta xlsx primeiro, depois csv
-        self.df1 = self._load("SDX_E1_CTCE_SJO_EXP_PCT_44")
-        self.df2 = self._load("CTCE_SJO_2_EXP_SAP_PCT_SDX_4_PCT_2025 (10)")
 
-        if self.df1 is not None:
-            self.df1['CEP_INICIAL'] = self.df1['CEP_INICIAL'].apply(self._cep_int)
-            self.df1['CEP_FINAL']   = self.df1['CEP_FINAL'].apply(self._cep_int)
-            self.df1 = self.df1[self.df1['CEP_INICIAL'] > 0]
-            # Normaliza nomes para lookup
-            self.df1['DIRECAO_TRIAGEM'] = self.df1['DIRECAO_TRIAGEM'].astype(str).str.strip()
-            self.df1['MCMCU_CENTRALIZADOR_DESTINO'] = self.df1['MCMCU_CENTRALIZADOR_DESTINO'].astype(str).str.strip()
+class OCREngine:
+    def __init__(self):
+        tesseract_paths = [
+            r'C:\Program Files\Tesseract-OCR\tesseract.exe',
+            r'C:\Users\admin_remoto\AppData\Local\Tesseract-OCR\tesseract.exe',
+            r'C:\Users\admin\AppData\Local\Tesseract-OCR\tesseract.exe'
+        ]
+        for path in tesseract_paths:
+            if os.path.exists(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                break
 
-        if self.df2 is not None:
-            self.df2['DIRECAO_TRIAGEM'] = self.df2['DIRECAO_TRIAGEM'].astype(str).str.strip()
-            self.df2['MCMCU_CENTRALIZADOR_DESTINO'] = self.df2['MCMCU_CENTRALIZADOR_DESTINO'].astype(str).str.strip()
+    def preprocess_image(self, pil_image):
+        """Pré-processamento OpenCV para melhorar leitura de endereços."""
+        try:
+            open_cv_image = np.array(pil_image.convert('RGB'))
+            open_cv_image = open_cv_image[:, :, ::-1].copy()
+            gray = cv2.cvtColor(open_cv_image, cv2.COLOR_BGR2GRAY)
+            gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            denoised = cv2.fastNlMeansDenoising(thresh, None, 10, 7, 21)
+            return Image.fromarray(denoised)
+        except Exception:
+            return pil_image
 
-    def _load(self, nome_base):
-        """Carrega o arquivo xlsx ou csv da pasta data/."""
-        for ext in ['.xlsx', '.csv']:
-            path = os.path.join(self.data_dir, nome_base + ext)
-            if not os.path.exists(path):
-                continue
-            try:
-                if ext == '.xlsx':
-                    df = pd.read_excel(path)
-                else:
-                    for sep in [';', ',', '\t']:
-                        try:
-                            df = pd.read_csv(path, sep=sep, encoding='utf-8')
-                            if len(df.columns) > 2:
-                                break
-                        except Exception:
-                            continue
-                df.columns = [str(c).strip().upper() for c in df.columns]
-                print(f"[Router] Carregado: {path} ({len(df)} linhas)")
-                return df
-            except Exception as e:
-                print(f"[Router] Erro ao carregar {path}: {e}")
-        print(f"[Router] Arquivo não encontrado: {nome_base}")
+    def _normalizar(self, texto):
+        """Remove acentos e converte para maiúsculas para comparação."""
+        replacements = {
+            'Á':'A','À':'A','Ã':'A','Â':'A','á':'a','à':'a','ã':'a','â':'a',
+            'É':'E','Ê':'E','é':'e','ê':'e','Í':'I','í':'i',
+            'Ó':'O','Ô':'O','Õ':'O','ó':'o','ô':'o','õ':'o',
+            'Ú':'U','ú':'u','Ç':'C','ç':'c'
+        }
+        for k, v in replacements.items():
+            texto = texto.replace(k, v)
+        return texto.upper().strip()
+
+    def _resolver_uf(self, texto_bruto):
+        """
+        Tenta extrair a sigla de UF de um texto como:
+        'Tiete/Sao Paulo/Brazil', 'Sao Paulo - SP', 'SP', 'Tiete/SP'
+        """
+        # Primeiro: Tenta encontrar sigla 2 letras após / ou - ou espaço
+        match_sigla = re.search(r'[/\-,\s]([A-Z]{2})(?:[/\-,\s]|$)', texto_bruto.upper())
+        if match_sigla:
+            sigla = match_sigla.group(1)
+            # Valida que é UF real (ignora "BR" de Brazil)
+            if sigla in ESTADOS_BR.values():
+                return sigla
+
+        # Segundo: Procura nome por extenso no texto
+        norm = self._normalizar(texto_bruto)
+        for nome, sigla in sorted(ESTADOS_BR.items(), key=lambda x: -len(x[0])):
+            if nome in norm:
+                return sigla
+
         return None
 
-    def _cep_int(self, valor):
+    def _limpar_logradouro(self, texto):
         """
-        Converte CEP para inteiro.
-        Regra: aceita apenas CEPs com exatamente 8 dígitos após limpeza.
-        CEPs com menos dígitos são descartados (retorna 0) para evitar
-        matches errados causados por OCR truncado.
-        Ex: '95678-871' -> 95678871 OK
-            '9500-34'   -> 6 digitos -> 0 (invalido, cai no fallback de endereço)
-            '01310100'  -> 01310100 OK
+        Remove prefixos, números, complementos e ruído do logradouro.
+        Ex: 'Santa Cruz: rua Santa Cruz: 789 casa' → 'Santa Cruz'
+        """
+        # Remove prefixos de tipo de logradouro
+        texto = re.sub(r'^(rua|r\.|av\.?|avenida|travessa|tv\.?|alameda|al\.?|estrada|est\.?|rodovia|rod\.?)\s+', '', texto, flags=re.IGNORECASE)
+        # Remove números, complementos e lixo
+        texto = re.sub(r'\b(n\.?|nº|casa|apto?|apartamento|bloco|andar|loja|sala|condo|condominio|s/n)\b.*', '', texto, flags=re.IGNORECASE)
+        texto = re.sub(r'\d+', '', texto)
+        # Remove pontuação duplicada e espaços extras
+        texto = re.sub(r'[:\-,;!?]+', ' ', texto)
+        texto = re.sub(r'\s+', ' ', texto).strip()
+        return texto
+
+    def _extrair_cidade(self, fragmento_cidade):
+        """
+        De 'Tiete/Sao Paulo/Brazil' extrai 'Tiete'.
+        """
+        # Pega o primeiro fragmento antes de / ou -
+        partes = re.split(r'[/\-,]', fragmento_cidade)
+        cidade = partes[0].strip()
+        # Remove caracteres não-letra
+        cidade = re.sub(r'[^A-Za-zÀ-ÖØ-öø-ÿ\s]', '', cidade).strip()
+        return cidade if len(cidade) > 2 else ""
+
+    def extract_address_data(self, pil_image):
+        """
+        Extrai Logradouro, Cidade e UF da imagem. Ignora CEPs impressos.
         """
         try:
-            apenas_digitos = re.sub(r'\D', '', str(valor))
-            if len(apenas_digitos) != 8:
-                return 0
-            return int(apenas_digitos)
-        except (ValueError, TypeError):
-            return 0
+            processed_image = self.preprocess_image(pil_image)
+            text = pytesseract.image_to_string(processed_image, lang='por', config='--psm 6')
 
-    def diagnostico(self):
-        """Retorna status das planilhas carregadas para exibição no sidebar."""
-        def info(df):
-            if df is None:
-                return {"linhas": 0, "colunas": []}
-            return {"linhas": len(df), "colunas": list(df.columns)}
+            # 1. Remove CEPs para não poluir a busca
+            text_cleaned = re.sub(r'\b\d{5}-?\d{3}\b', '', text)
+            # Remove "Brazil" / "Brasil" e símbolos de telefone
+            text_cleaned = re.sub(r'\b(brazil|brasil)\b', '', text_cleaned, flags=re.IGNORECASE)
+            text_cleaned = re.sub(r'[\+\#\*\(\)]', '', text_cleaned)
 
-        return {
-            "planilha1": info(self.df1),
-            "planilha2": info(self.df2)
-        }
-
-    def route_cep(self, cep):
-        """
-        Roteamento Relacional em 2 passos:
-        A) CEP (range) → MCMCU_CENTRALIZADOR_DESTINO + DIRECAO_TRIAGEM (PL1)
-        B) MCMCU_CENTRALIZADOR_DESTINO + DIRECAO_TRIAGEM → CELULA + POSICAO (PL2)
-        """
-        cep_int = self._cep_int(cep)
-        if cep_int == 0:
-            return {"sucesso": False, "erro": "CEP inválido"}
-
-        if self.df1 is None:
-            return {"sucesso": False, "erro": "Planilha 1 (SDX_E1) não carregada"}
-
-        # Passo A: Range na PL1
-        mask1 = (self.df1['CEP_INICIAL'] <= cep_int) & (self.df1['CEP_FINAL'] >= cep_int)
-        match1 = self.df1[mask1]
-
-        if match1.empty:
-            return {"sucesso": False, "erro": f"CEP {cep} não encontrado na faixa da PL1"}
-
-        row1 = match1.iloc[0]
-        mcmcu      = str(row1.get('MCMCU_CENTRALIZADOR_DESTINO', '')).strip()
-        direcao_pl1 = str(row1.get('DIRECAO_TRIAGEM', '')).strip()
-
-        if self.df2 is None:
-            return {
-                "sucesso": True,
-                "destino": direcao_pl1,
-                "celula": "—",
-                "posicao": "—",
-                "aviso": "Planilha 2 não carregada"
+            address_info = {
+                "cidade": "", "uf": "", "logradouro": "",
+                "texto_bruto": text_cleaned
             }
 
-        # Passo B: Join pela coluna MCMCU_CENTRALIZADOR_DESTINO na PL2
-        # Se houver múltiplas linhas para o mesmo MCMCU (ex: INDAIATUBA PL1/PL2/PL3),
-        # usamos também DIRECAO_TRIAGEM para afinar o match
-        mask2_mcmcu = self.df2['MCMCU_CENTRALIZADOR_DESTINO'] == mcmcu
-        match2 = self.df2[mask2_mcmcu]
+            lines = [l.strip() for l in text_cleaned.split('\n') if l.strip()]
 
-        if match2.empty:
-            return {
-                "sucesso": True,
-                "destino": direcao_pl1,
-                "celula": "—",
-                "posicao": "—",
-                "aviso": f"MCMCU {mcmcu} não encontrado na PL2"
-            }
+            for i, line in enumerate(lines):
+                # Padrão: qualquer coisa que contenha uma barra ou hífen seguido de texto
+                # Busca linha com padrão Cidade/Estado (ex: Tiete/Sao Paulo, Bauru - SP)
+                match = re.search(
+                    r'([A-Za-zÀ-ÖØ-öø-ÿ\s\.]+)[/\-,]\s*([A-Za-zÀ-ÖØ-öø-ÿ\s\.\/]+)',
+                    line
+                )
+                if match:
+                    cidade_raw = match.group(1)
+                    restante = match.group(0)  # linha completa com separadores
 
-        # Se houver mais de 1 linha, tenta refinar pelo DIRECAO_TRIAGEM
-        if len(match2) > 1:
-            match_refinado = match2[match2['DIRECAO_TRIAGEM'].str.upper() == direcao_pl1.upper()]
-            if not match_refinado.empty:
-                match2 = match_refinado
+                    cidade = self._extrair_cidade(cidade_raw)
+                    uf = self._resolver_uf(restante)
 
-        row2 = match2.iloc[0]
-        destino_final = str(row2.get('DIRECAO_TRIAGEM', direcao_pl1)).strip()
-        celula  = str(row2.get('CELULA',  '—')).strip()
-        posicao = str(row2.get('POSICAO', '—')).strip()
+                    if cidade and uf:
+                        address_info["cidade"] = cidade
+                        address_info["uf"] = uf
 
-        return {
-            "sucesso": True,
-            "destino": destino_final,
-            "celula":  celula,
-            "posicao": posicao
-        }
+                        # Logradouro: linha anterior
+                        if i > 0:
+                            address_info["logradouro"] = self._limpar_logradouro(lines[i - 1])
+                        # Fallback: mesma linha
+                        if not address_info["logradouro"]:
+                            address_info["logradouro"] = self._limpar_logradouro(line)
+                        break
+
+            return address_info
+
+        except Exception as e:
+            return {"cidade": "", "uf": "", "logradouro": "", "erro": str(e), "texto_bruto": ""}
